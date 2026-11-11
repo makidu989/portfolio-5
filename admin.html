@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>포트폴리오 관리자 · 편집 및 게시</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;color:#172234;background:#f3f6fa}*{box-sizing:border-box}
+body{margin:0}.wrap{max-width:1120px;margin:0 auto;padding:28px 20px 70px}header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px}h1{font-size:24px;margin:0}h2{font-size:17px;margin:0 0 14px}p{line-height:1.6}.muted{color:#637083;font-size:13px}
+.panel{background:white;border:1px solid #e0e6ec;border-radius:16px;padding:22px;margin-bottom:16px;box-shadow:0 4px 18px #1523340a}
+input,textarea{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font:inherit;background:white;color:#142437}
+textarea{resize:vertical;min-height:110px}label{display:block;font-size:13px;font-weight:650;margin:12px 0 6px}
+button{border:none;border-radius:10px;padding:11px 16px;font-weight:700;font:inherit;cursor:pointer;background:#1664c0;color:white}
+button.ghost{background:#e8eef6;color:#1c3658}button.danger{background:#fceaea;color:#a62222}button:disabled{opacity:.5;cursor:not-allowed}
+.actions{display:flex;flex-wrap:wrap;gap:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:730px){.grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}}
+.hidden{display:none!important}.status{min-height:22px;font-size:13px;margin:12px 0}.preview{border:1px solid #dce3eb;border-radius:12px;padding:20px;background:#fafcff;min-height:190px}.preview h3{font-size:22px;margin:0 0 6px}.preview-item{border-top:1px solid #e0e6ec;padding:12px 0}
+.mono{font:12px ui-monospace,monospace;word-break:break-all}
+</style></head><body><div class="wrap">
+<header><div><h1>포트폴리오 관리자</h1><div class="muted">초안 편집 → 미리보기 → 명시적 게시</div></div><div class="actions"><a href="./" target="_blank" rel="noopener">공개 사이트 열기</a><button id="logout" class="ghost hidden">로그아웃</button></div></header>
+<section id="configPanel" class="panel hidden"><h2>Firebase 연결 설정 필요</h2><p>이 파일의 <code>firebaseConfig</code>에 Firebase 콘솔의 웹 앱 설정 정보를 입력해 주세요. 비밀번호나 서비스 계정 키를 입력하지 마세요.</p></section>
+<section id="loginPanel" class="panel"><h2>관리자 로그인</h2><p class="muted">Firebase Authentication에 등록한 이메일/비밀번호로 로그인하세요. 관리 권한은 Firestore 규칙에서 별도로 확인합니다.</p><label for="email">이메일</label><input id="email" type="email" autocomplete="username"><label for="password">비밀번호</label><input id="password" type="password" autocomplete="current-password"><div class="actions" style="margin-top:14px"><button id="login">로그인</button></div></section>
+<main id="editor" class="hidden">
+<div class="grid"><section class="panel"><h2>기본 프로필</h2><label for="name">표시 이름</label><input id="name" maxlength="100"><label for="headline">한 줄 소개</label><input id="headline" maxlength="200"><label for="about">자기소개</label><textarea id="about"></textarea><label for="skills">핵심 역량 (쉼표로 구분)</label><input id="skills"></section>
+<section class="panel"><h2>프로젝트 편집</h2><p class="muted">한 줄에 하나씩 <strong>프로젝트명 | 설명 | 이미지 경로</strong> 형식으로 입력하세요. 이미지 경로는 기존 GitHub에 업로드된 파일 경로 또는 HTTPS 주소만 사용하세요.</p><textarea id="projects" style="min-height:240px" placeholder="행사 운영 분석 | 현장 동선 및 운영 개선안 | images/analysis.jpg"></textarea><p class="muted">기존 V5 프로젝트는 자동으로 가져오지 않습니다. 아직 기존 페이지와 데이터 연결 전입니다.</p></section></div>
+<section class="panel"><h2>미리보기</h2><p class="muted">입력값이 즉시 아래에 표시됩니다. 저장 전에도 확인할 수 있습니다.</p><div class="preview" id="preview" aria-live="polite"></div></section>
+<section class="panel"><h2>저장 / 게시</h2><p class="muted">초안 저장은 관리자에게만 보이고, 게시하기는 <code>published/site</code> 문서를 갱신합니다. 기존 공개 페이지가 이 문서를 읽도록 연결되기 전에는 방문자 화면은 바뀌지 않습니다.</p><div class="actions"><button id="save" class="ghost">초안 저장</button><button id="publish">게시하기</button><button id="reload" class="ghost">저장된 초안 다시 불러오기</button></div><p id="updated" class="muted"></p></section></main>
+<p id="status" class="status" role="status"></p>
+</div>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+import {getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+import {getFirestore,doc,getDoc,setDoc,writeBatch,serverTimestamp} from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+// Firebase 콘솔 → 프로젝트 설정 → 일반 → 내 앱 → SDK 설정 및 구성의 값을 입력
+const firebaseConfig = {
+  apiKey: "PASTE_FIREBASE_API_KEY",
+  authDomain: "portfolio-admin-289e9.firebaseapp.com",
+  projectId: "portfolio-admin-289e9",
+  storageBucket: "portfolio-admin-289e9.firebasestorage.app",
+  messagingSenderId: "PASTE_MESSAGING_SENDER_ID",
+  appId: "PASTE_FIREBASE_APP_ID"
+};
+const $=id=>document.getElementById(id);
+const fields=["name","headline","about","skills","projects"];
+const status=(msg,error=false)=>{$("status").textContent=msg;$("status").style.color=error?"#b42318":"#315a87"};
+let auth,db,ready=false;
+const isConfigured=!Object.values(firebaseConfig).some(v=>String(v).startsWith("PASTE_"));
+if(!isConfigured){$("configPanel").classList.remove("hidden");$("loginPanel").classList.add("hidden");status("Firebase 설정 정보가 아직 입력되지 않았습니다.",true)}
+else {
+ try {
+ const app=initializeApp(firebaseConfig); auth=getAuth(app); db=getFirestore(app);ready=true;
+ onAuthStateChanged(auth,async user=>{
+   $("loginPanel").classList.toggle("hidden",!!user);$("editor").classList.toggle("hidden",!user);$("logout").classList.toggle("hidden",!user);
+   if(user){status("로그인 완료 · Firestore 접근 권한 확인 중");await loadDraft()}else status("로그인이 필요합니다.");
+ });
+ }catch(e){status("Firebase 초기화 실패: "+e.message,true)}
+}
+function fromForm(){return {name:$("name").value.trim(),headline:$("headline").value.trim(),about:$("about").value,skills:$("skills").value.split(",").map(s=>s.trim()).filter(Boolean),projects:$("projects").value.split("\n").filter(s=>s.trim()).map(line=>{const [title="",description="",image=""]=line.split("|");return {title:title.trim(),description:description.trim(),image:image.trim()}})}}
+function intoForm(v){$("name").value=v?.name||"";$("headline").value=v?.headline||"";$("about").value=v?.about||"";$("skills").value=(v?.skills||[]).join(", ");$("projects").value=(v?.projects||[]).map(p=>[p.title||"",p.description||"",p.image||""].join(" | ")).join("\n");render()}
+function render(){const d=fromForm(),el=$("preview");el.replaceChildren();const add=(tag,txt,parent=el)=>{let node=document.createElement(tag);node.textContent=txt;parent.append(node);return node};add("h3",d.name||"이름");add("p",d.headline||"한 줄 소개");add("p",d.about||"자기소개");add("p","핵심 역량: "+(d.skills.join(" · ")||"미입력"));for(const p of d.projects){let item=document.createElement("div");item.className="preview-item";add("strong",p.title||"프로젝트",item);add("p",p.description,item);if(p.image)add("span","이미지: "+p.image,item).className="muted";el.append(item)}}
+fields.forEach(id=>$(id).addEventListener("input",render));
+$("login").addEventListener("click",async()=>{if(!ready)return;try{await signInWithEmailAndPassword(auth,$("email").value,$("password").value);$("password").value=""}catch(e){status("로그인 실패: "+e.code,true)}});
+$("logout").addEventListener("click",()=>signOut(auth));
+async function loadDraft(){try{const snap=await getDoc(doc(db,"drafts","site"));if(snap.exists()){intoForm(snap.data().content||{});status("저장된 초안을 불러왔습니다.")}else{intoForm({});status("초안이 없습니다. 내용을 입력해 주세요.")}}catch(e){status("초안 읽기 실패 (관리자 UID 또는 규칙 확인): "+e.code,true)}}
+$("reload").addEventListener("click",loadDraft);
+$("save").addEventListener("click",async()=>{if(!auth?.currentUser)return;try{await setDoc(doc(db,"drafts","site"),{content:fromForm(),updatedAt:serverTimestamp(),updatedBy:auth.currentUser.uid});status("초안이 저장되었습니다. 공개본은 변경되지 않았습니다.")}catch(e){status("초안 저장 실패: "+e.code,true)}});
+$("publish").addEventListener("click",async()=>{if(!auth?.currentUser)return;if(!confirm("현재 입력 내용을 공개 데이터로 게시할까요?"))return;const content=fromForm();try{const versionId=new Date().toISOString().replace(/[:.]/g,"-");const batch=writeBatch(db);const meta={content,updatedAt:serverTimestamp(),updatedBy:auth.currentUser.uid};batch.set(doc(db,"published","site"),meta);batch.set(doc(db,"versions",versionId),meta);batch.set(doc(db,"drafts","site"),meta);await batch.commit();status("Firestore 게시 데이터가 갱신되었습니다. 공개 사이트 연동 전에는 화면이 바뀌지 않습니다.");$("updated").textContent="게시 시각: "+new Date().toLocaleString("ko-KR")}catch(e){status("게시 실패: "+e.code,true)}});
+render();
+</script></body></html>
